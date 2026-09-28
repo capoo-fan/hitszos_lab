@@ -89,3 +89,45 @@ uint64 sys_rename(void) {
   p->name[len] = '\0';
   return 0;
 }
+
+uint64 sys_seccomp_ctl(void) {
+  int op;
+  uint64 arg;
+  struct proc *p = myproc();
+
+  if (argint(0, &op) < 0 || argaddr(1, &arg) < 0) return -1;
+  switch (op) {
+  case 0:
+    p->seccomp_mask = arg;
+    p->seccomp_enabled = 1;
+    return 0;
+  case 1:
+    p->max_children = arg;
+    return 0;
+  default:
+    return -1;
+  }
+}
+
+uint64 sys_seccomp_getlog(void) {
+  uint64 buf, lenaddr;
+  int capacity, count;
+  struct proc *p = myproc();
+
+  if (argaddr(0, &buf) < 0 || argaddr(1, &lenaddr) < 0 ||
+      copyin(p->pagetable, (char *)&capacity, lenaddr, sizeof(capacity)) < 0 ||
+      capacity < 0)
+    return -1;
+
+  count = p->seccomp_log_count;
+  if (count > capacity) count = capacity;
+  for (int i = 0; i < count; i++) {
+    uint64 entry = p->seccomp_log[(p->seccomp_log_start + i) % SECCOMP_LOG_SIZE];
+    if (copyout(p->pagetable, buf + i * sizeof(entry), (char *)&entry,
+                sizeof(entry)) < 0)
+      return -1;
+  }
+  if (copyout(p->pagetable, lenaddr, (char *)&count, sizeof(count)) < 0)
+    return -1;
+  return 0;
+}

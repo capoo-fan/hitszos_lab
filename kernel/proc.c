@@ -14,6 +14,7 @@ struct proc *initproc;
 
 int nextpid = 1;
 struct spinlock pid_lock;
+static struct spinlock children_lock;
 
 extern void forkret(void);
 static void wakeup1(struct proc *chan);
@@ -26,6 +27,7 @@ void procinit(void) {
   struct proc *p;
 
   initlock(&pid_lock, "nextpid");
+  initlock(&children_lock, "children");
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
 
@@ -96,6 +98,12 @@ static struct proc *allocproc(void) {
 
 found:
   p->pid = allocpid();
+  p->seccomp_mask = 0;
+  p->seccomp_enabled = 0;
+  p->seccomp_log_start = 0;
+  p->seccomp_log_count = 0;
+  p->max_children = ~0ULL;
+  p->child_count = 0;
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -230,20 +238,37 @@ int fork(void) {
   struct proc *np;
   struct proc *p = myproc();
 
+  acquire(&children_lock);
+  if ((uint64)p->child_count >= p->max_children) {
+    release(&children_lock);
+    return -1;
+  }
+  p->child_count++;
+  release(&children_lock);
+
   // Allocate process.
   if ((np = allocproc()) == 0) {
+    acquire(&children_lock);
+    p->child_count--;
+    release(&children_lock);
     return -1;
   }
 
-  // Copy user memory from parent to child.
   if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) {
     freeproc(np);
     release(&np->lock);
+    acquire(&children_lock);
+    p->child_count--;
+    release(&children_lock);
     return -1;
   }
   np->sz = p->sz;
 
   np->parent = p;
+  np->seccomp_mask = p->seccomp_mask;
+  np->seccomp_enabled = p->seccomp_enabled;
+  np->max_children = p->max_children;
+  // allocproc() initialized the child's own log and child count.
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -282,6 +307,10 @@ void reparent(struct proc *p) {
       // because only the parent changes it, and we're the parent.
       acquire(&pp->lock);
       pp->parent = initproc;
+      acquire(&children_lock);
+      p->child_count--;
+      initproc->child_count++;
+      release(&children_lock);
       // we should wake up init here, but that would require
       // initproc->lock, which would be a deadlock, since we hold
       // the lock on one of init's children (pp). this is why
@@ -303,7 +332,7 @@ void exit(int status) {
     [ZOMBIE] "zombie"};
 
   struct proc *p = myproc();
-  
+
   struct proc *pp;
   int child_num = 0;
 
@@ -409,6 +438,11 @@ int wait(uint64 addr, int flags) {
             return -1;
           }
           freeproc(np);
+
+          acquire(&children_lock);
+          p->child_count--;
+          release(&children_lock);
+          
           release(&np->lock);
           release(&p->lock);
           return pid;

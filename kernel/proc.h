@@ -82,6 +82,8 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define SECCOMP_LOG_SIZE 32
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -103,4 +105,12 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+                               // 
+  uint64 seccomp_mask;         // syscall number
+  int seccomp_enabled;
+  uint64 seccomp_log[SECCOMP_LOG_SIZE];
+  int seccomp_log_start;    
+  int seccomp_log_count;
+  uint64 max_children;
+  int child_count;           
 };
