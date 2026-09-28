@@ -500,6 +500,31 @@ void yield(void) {
   release(&p->lock);
 }
 
+void yield_info(void) {
+  struct proc *p = myproc();
+  struct proc *next;
+
+  printf("Save the context of the process to the memory region from address %p to %p\n",
+         &p->context, (char *)&p->context + sizeof(p->context));
+  printf("Current running process pid is %d and user pc is %p\n",
+         p->pid, p->trapframe->epc);
+
+  for (int offset = 1; offset < NPROC; offset++) {
+    next = &proc[(p - proc + offset) % NPROC];
+    acquire(&next->lock);
+    if (next->state == RUNNABLE) {
+      printf("Next runnable process pid is %d and user pc is %p\n",
+             next->pid, next->trapframe->epc);
+      release(&next->lock);
+      return;
+    }
+    release(&next->lock);
+  }
+  // If nobody else is runnable, the scheduler can select p again.
+  printf("Next runnable process pid is %d and user pc is %p\n",
+         p->pid, p->trapframe->epc);
+}
+
 // A fork child's very first scheduling by scheduler()
 // will swtch to forkret.
 void forkret(void) {
