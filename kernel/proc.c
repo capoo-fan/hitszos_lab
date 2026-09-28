@@ -295,7 +295,17 @@ void reparent(struct proc *p) {
 // An exited process remains in the zombie state
 // until its parent calls wait().
 void exit(int status) {
+  static char *states[] = {
+    [UNUSED] "unused",
+    [SLEEPING] "sleep",
+    [RUNNABLE] "runble",
+    [RUNNING] "run",
+    [ZOMBIE] "zombie"};
+
   struct proc *p = myproc();
+  
+  struct proc *pp;
+  int child_num = 0;
 
   if (p == initproc) panic("init exiting");
 
@@ -337,6 +347,19 @@ void exit(int status) {
   acquire(&original_parent->lock);
 
   acquire(&p->lock);
+
+  // 打印信息
+  exit_info("proc %d exit, parent pid %d, name %s, state %s\n",
+            p->pid, original_parent->pid, original_parent->name, states[original_parent->state]);
+  for (pp = proc; pp < &proc[NPROC]; pp++) {
+    // 遍历子进程
+    if (pp->parent == p) {
+      acquire(&pp->lock);
+      exit_info("proc %d exit, child %d, pid %d, name %s, state %s\n",
+                p->pid, child_num++, pp->pid, pp->name, states[pp->state]);
+      release(&pp->lock);
+    }
+  }
 
   // Give any children to init.
   reparent(p);
